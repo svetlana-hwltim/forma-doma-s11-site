@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Форма Дома — мебель по индивидуальным размерам в Краснодаре.">
+  <title>Форма Дома — мебель на заказ в Краснодаре</title>
+  <link rel="stylesheet" href="static/css/site.css">
+  <meta http-equiv="Content-Security-Policy" content="default-src &#39;self&#39;; connect-src &#39;self&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;">
+  <script src="static/js/api-config.js" defer></script>
+<script src="static/js/static-config.js" defer></script>
+<script src="static/js/static-calculator.js" defer></script><script src="static/js/site.js" defer></script>
+</head>
+<body>
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="index.html" aria-label="Форма Дома — главная">
+      <span class="brand-icon" aria-hidden="true"><i></i></span>Форма Дома
+    </a>
+    
+<button class="menu-toggle" type="button" aria-expanded="false" aria-controls="main-nav">Меню</button>
+<nav id="main-nav" aria-label="Основная навигация">
+  <a href="#furniture">Виды мебели</a>
+  <a href="#calculator">Калькулятор</a>
+  <a class="button outline nav-cta" href="#request">Оставить заявку</a>
+</nav>
+
+  </div>
+</header>
+
+<main>
+  <section class="hero wrap" aria-labelledby="hero-title">
+    <div class="hero-copy">
+      <p class="eyebrow"><span></span> Мебельная мастерская · Краснодар</p>
+      <h1 id="hero-title">Мебель по вашим размерам <em>— под пространство и привычки</em></h1>
+      <p class="intro">Кухни, шкафы и системы хранения по индивидуальным размерам. Для комнат, где у каждой вещи есть своё место.</p>
+      <div class="actions">
+        <a class="button primary" href="#calculator">Рассчитать стоимость <span class="arrow" aria-hidden="true"></span></a>
+        <a class="button outline" href="#request">Оставить заявку</a>
+      </div>
+    </div>
+    <figure class="hero-image">
+      <img src="static/images/hero.webp" alt="Кухня с деревянными фасадами и светлым каменным островом" fetchpriority="high" width="1200" height="920">
+      <figcaption>Демонстрационный интерьер</figcaption>
+    </figure>
+  </section>
+
+  <section id="furniture" class="catalog">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Виды мебели</h2>
+        <p>Выберите категорию, чтобы перейти к расчёту.</p>
+      </div>
+      <div class="cards">
+      
+        <article class="card">
+          <a href="#calculator" data-category="kitchen">
+            <img src="static/images/kitchen.webp" alt="Демонстрационный интерьер · кухни" width="500" height="375" loading="lazy">
+            <div class="card-copy"><h3>Кухни</h3><span class="arrow" aria-hidden="true"></span><p>Гарнитуры, продуманные под ваш сценарий готовки.</p></div>
+          </a>
+        </article>
+      
+        <article class="card">
+          <a href="#calculator" data-category="wardrobe">
+            <img src="static/images/wardrobe.webp" alt="Демонстрационный интерьер · шкафы" width="500" height="375" loading="lazy">
+            <div class="card-copy"><h3>Шкафы</h3><span class="arrow" aria-hidden="true"></span><p>Встроенные и отдельно стоящие шкафы по вашим размерам.</p></div>
+          </a>
+        </article>
+      
+        <article class="card">
+          <a href="#calculator" data-category="closet">
+            <img src="static/images/closet.webp" alt="Демонстрационный интерьер · гардеробные" width="500" height="375" loading="lazy">
+            <div class="card-copy"><h3>Гардеробные</h3><span class="arrow" aria-hidden="true"></span><p>Хранение одежды и аксессуаров с удобным доступом.</p></div>
+          </a>
+        </article>
+      
+        <article class="card">
+          <a href="#calculator" data-category="storage">
+            <img src="static/images/storage.webp" alt="Демонстрационный интерьер · системы хранения" width="500" height="375" loading="lazy">
+            <div class="card-copy"><h3>Системы хранения</h3><span class="arrow" aria-hidden="true"></span><p>Стеллажи, тумбы и модули для жилых комнат.</p></div>
+          </a>
+        </article>
+      
+      </div>
+    </div>
+  </section>
+
+  <section id="calculator" class="wrap section-grid">
+    <div>
+      <h2>Калькулятор стоимости</h2>
+      <p class="intro">Выберите мебель, укажите размеры и материал, чтобы получить предварительную оценку.</p>
+      <p class="notice">Расчёт демонстрационный и не является коммерческим предложением. Итоговая стоимость определяется после уточнения параметров проекта.</p>
+    </div>
+    <form id="calculator-form" class="panel">
+      <label>Вид мебели<select name="category" required><option value="kitchen">Кухни</option><option value="wardrobe">Шкафы</option><option value="closet">Гардеробные</option><option value="storage">Системы хранения</option></select></label>
+      <div class="fields">
+        <label>Ширина, см<input name="width" inputmode="decimal" maxlength="12" required value="240" aria-describedby="dimensions"></label>
+        <label>Высота, см<input name="height" inputmode="decimal" maxlength="12" required value="220" aria-describedby="dimensions"></label>
+      </div>
+      <p id="dimensions" class="hint">От 30 до 600 см по каждому измерению.</p>
+      <label>Материал<select name="material" required><option value="basic">Базовый</option><option value="improved">Улучшенный</option><option value="premium">Премиальный</option></select></label>
+      <label class="check"><input type="checkbox" name="installation">Добавить установку · 5 000 ₽</label>
+      <button class="button primary" type="submit">Рассчитать стоимость</button>
+      <p class="status" id="calculator-status" role="status"></p>
+      <div class="estimate" id="estimate" hidden>
+        <div><span>Предварительная стоимость</span><output id="amount"></output></div>
+        <a class="button outline" id="use-estimate" href="#request">Перенести в заявку</a>
+      </div>
+    </form>
+  </section>
+  <section id="request" class="request-section">
+    <div class="wrap section-grid">
+      <div>
+        <h2>Оставить заявку</h2>
+        <p class="intro">Расскажите, какая мебель вам нужна. Можно приложить параметры из калькулятора.</p>
+        <p class="notice">Учебная форма. Для проверки используйте вымышленные данные.</p>
+      </div>
+      <form id="request-form" class="panel" method="post" action="index.html" data-csrf="" data-static-site>
+        <div class="fields">
+          <label>Имя<input name="name" autocomplete="name" maxlength="80" required></label>
+          <label>Телефон<input name="phone" type="tel" autocomplete="tel" maxlength="24" required placeholder="+7 900 000-00-00"></label>
+        </div>
+        <label>Вид мебели<select name="category"><option value="">Не выбрано</option><option value="kitchen">Кухни</option><option value="wardrobe">Шкафы</option><option value="closet">Гардеробные</option><option value="storage">Системы хранения</option></select></label>
+        <div id="attached" class="attached" hidden><p id="attached-details"></p><button type="button" id="remove-estimate">Убрать расчёт</button></div>
+        <label>Комментарий <span class="hint">(необязательно)</span><textarea name="comment" rows="4" maxlength="1000"></textarea></label>
+        <label class="check"><input type="checkbox" name="consent" required><span>Согласен на обработку данных. <a href="privacy.html">Политика обработки данных</a></span></label>
+        <button type="submit" class="button primary" disabled>Отправить заявку <span class="arrow" aria-hidden="true"></span></button>
+        <p class="status" id="request-status" role="status"></p>
+      </form>
+    </div>
+  </section>
+  <noscript><div class="wrap notice">Для калькулятора и формы заявки требуется JavaScript.</div></noscript>
+</main>
+
+<footer>
+  <div class="wrap footer-inner">
+    <a class="brand" href="index.html">Форма Дома</a>
+    <span>Краснодар · Учебный проект</span>
+    <a href="privacy.html">Политика обработки данных</a>
+  </div>
+</footer>
+</body>
+</html>
