@@ -26,6 +26,7 @@ const apiUrl = siteKey && configuredApi === 'https://forma-doma-telegram.olga-fo
   ? configuredApi
   : '';
 let challengeScript;
+let challengeLoadAttempt = 0;
 const estimateBox = document.querySelector('#estimate');
 const attachedBox = document.querySelector('#attached');
 const calcStatus = document.querySelector('#calculator-status');
@@ -67,29 +68,31 @@ function loadChallenge() {
 
   challengeScript = new Promise((resolve, reject) => {
     const script = document.createElement('script');
+    const callbackName = `formaDomaTurnstileLoaded${++challengeLoadAttempt}`;
     const finish = () => {
       clearTimeout(timer);
-      script.onload = null;
+      delete window[callbackName];
       script.onerror = null;
     };
-    const fail = () => {
+    const fail = message => {
       finish();
       script.remove();
-      reject(new Error('Проверка формы временно недоступна.'));
+      reject(new Error(message));
     };
-    const timer = setTimeout(fail, 10000);
-    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
-    script.onerror = fail;
-    script.onload = () => {
+    const unavailable = 'Не удалось загрузить Cloudflare Turnstile. Проверьте соединение и попробуйте снова.';
+    const timer = setTimeout(() => fail(unavailable), 15000);
+    window[callbackName] = () => {
       const api = window.turnstile;
-      if (!isAvailable(api)) return fail();
+      if (!isAvailable(api)) return fail(unavailable);
       finish();
       resolve(api);
     };
+    script.src = `https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=${callbackName}`;
+    script.onerror = () => fail(unavailable);
     try {
       document.head.append(script);
     } catch {
-      fail();
+      fail(unavailable);
     }
   }).catch(error => {
     challengeScript = undefined;
@@ -106,10 +109,22 @@ async function getChallengeToken() {
   try {
     return await new Promise((resolve, reject) => {
       const fail = () => reject(new Error('Не удалось пройти проверку формы. Попробуйте снова.'));
+      const challengeError = code => {
+        const codeText = String(code);
+        const message = {
+          '110100': 'Ключ Turnstile недействителен (110100).',
+          '110110': 'Ключ Turnstile не найден (110110).',
+          '110200': 'Домен сайта не разрешён в настройках Turnstile (110200).',
+          '200500': 'Не удалось загрузить окно проверки Turnstile (200500).',
+        }[codeText];
+        if (message) reject(new Error(message));
+        else fail();
+        return true;
+      };
       timer = setTimeout(fail, 20000);
       widget = turnstile.render(container, {
         sitekey: siteKey, action: 'application', execution: 'execute', appearance: 'interaction-only', retry: 'never',
-        'response-field': false, callback: resolve, 'error-callback': fail,
+        'response-field': false, callback: resolve, 'error-callback': challengeError,
         'expired-callback': fail, 'timeout-callback': fail,
       });
       turnstile.execute(widget);
@@ -130,6 +145,9 @@ async function post(url, data) {
     signal: AbortSignal.timeout(apiUrl ? 30000 : 15000),
   });
   const body = await response.json();
+  if (!response.ok && body.code === 'challenge_unavailable') {
+    throw new Error('Сервер временно не смог проверить Turnstile. Попробуйте позже.');
+  }
   if (!response.ok) throw Object.assign(new Error(body.error || 'Сервис временно недоступен.'), { code: body.code });
   return body;
 }
