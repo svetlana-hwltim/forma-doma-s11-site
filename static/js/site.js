@@ -21,9 +21,11 @@ const calculator = document.querySelector('#calculator-form');
 const form = document.querySelector('#request-form');
 const staticMode = form.hasAttribute('data-static-site');
 const configuredApi = staticMode && typeof staticApiUrl === 'string' ? staticApiUrl : '';
-const apiUrl = /^https:\/\/[a-z0-9.-]+\/api\/application$/.test(configuredApi)
+const siteKey = typeof staticTurnstileSiteKey === 'string' ? staticTurnstileSiteKey : '';
+const apiUrl = siteKey && configuredApi === 'https://forma-doma-telegram.olga-form.workers.dev/api/application'
   ? configuredApi
   : '';
+let challengeScript;
 const estimateBox = document.querySelector('#estimate');
 const attachedBox = document.querySelector('#attached');
 const calcStatus = document.querySelector('#calculator-status');
@@ -57,6 +59,58 @@ async function getFormProof() {
   return body.csrf;
 }
 
+function loadChallenge() {
+  if (window.turnstile) return Promise.resolve(window.turnstile);
+  if (!challengeScript) {
+    challengeScript = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      const fail = () => {
+        clearTimeout(timer);
+        script.remove();
+        reject(new Error('Проверка формы временно недоступна.'));
+      };
+      const timer = setTimeout(fail, 10000);
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      script.onerror = fail;
+      script.onload = () => {
+        if (!window.turnstile) return fail();
+        window.turnstile.ready(() => {
+          clearTimeout(timer);
+          resolve(window.turnstile);
+        });
+      };
+      document.head.append(script);
+    }).catch(error => {
+      challengeScript = undefined;
+      throw error;
+    });
+  }
+  return challengeScript;
+}
+
+async function getChallengeToken() {
+  const turnstile = await loadChallenge();
+  const container = document.createElement('div');
+  form.append(container);
+  let widget, timer;
+  try {
+    return await new Promise((resolve, reject) => {
+      const fail = () => reject(new Error('Не удалось пройти проверку формы. Попробуйте снова.'));
+      timer = setTimeout(fail, 20000);
+      widget = turnstile.render(container, {
+        sitekey: siteKey, action: 'application', execution: 'execute', appearance: 'interaction-only', retry: 'never',
+        'response-field': false, callback: resolve, 'error-callback': fail,
+        'expired-callback': fail, 'timeout-callback': fail,
+      });
+      turnstile.execute(widget);
+    });
+  } finally {
+    clearTimeout(timer);
+    if (widget !== undefined) turnstile.remove(widget);
+    container.remove();
+  }
+}
+
 async function post(url, data) {
   const response = await fetch(url, {
     method: 'POST',
@@ -66,7 +120,7 @@ async function post(url, data) {
     signal: AbortSignal.timeout(apiUrl ? 30000 : 15000),
   });
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error || 'Сервис временно недоступен.');
+  if (!response.ok) throw Object.assign(new Error(body.error || 'Сервис временно недоступен.'), { code: body.code });
   return body;
 }
 
@@ -176,6 +230,7 @@ form.addEventListener('submit', async (event) => {
   try {
     if (apiUrl) {
       data.csrf = await getFormProof();
+      data.turnstileToken = await getChallengeToken();
     }
     const result = await post(apiUrl || '/api/request', data);
     if (result.ok !== true) throw new Error('Доставка заявки не подтверждена.');
@@ -184,6 +239,7 @@ form.addEventListener('submit', async (event) => {
     clearAttached();
     status(requestStatus, 'Заявка доставлена.');
   } catch (error) {
+    if (error.code === 'telegram_rejected') submission = null;
     status(requestStatus, error.name === 'Error' ? error.message : 'Доставка заявки не подтверждена. Попробуйте позже.', true);
   } finally {
     for (const control of fields) control.disabled = false;
