@@ -60,31 +60,41 @@ async function getFormProof() {
 }
 
 function loadChallenge() {
-  if (window.turnstile) return Promise.resolve(window.turnstile);
-  if (!challengeScript) {
-    challengeScript = new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      const fail = () => {
-        clearTimeout(timer);
-        script.remove();
-        reject(new Error('Проверка формы временно недоступна.'));
-      };
-      const timer = setTimeout(fail, 10000);
-      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
-      script.onerror = fail;
-      script.onload = () => {
-        if (!window.turnstile) return fail();
-        window.turnstile.ready(() => {
-          clearTimeout(timer);
-          resolve(window.turnstile);
-        });
-      };
+  if (challengeScript) return challengeScript;
+  const isAvailable = api => typeof api?.render === 'function' &&
+    typeof api.execute === 'function' && typeof api.remove === 'function';
+  if (isAvailable(window.turnstile)) return Promise.resolve(window.turnstile);
+
+  challengeScript = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    const finish = () => {
+      clearTimeout(timer);
+      script.onload = null;
+      script.onerror = null;
+    };
+    const fail = () => {
+      finish();
+      script.remove();
+      reject(new Error('Проверка формы временно недоступна.'));
+    };
+    const timer = setTimeout(fail, 10000);
+    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    script.onerror = fail;
+    script.onload = () => {
+      const api = window.turnstile;
+      if (!isAvailable(api)) return fail();
+      finish();
+      resolve(api);
+    };
+    try {
       document.head.append(script);
-    }).catch(error => {
-      challengeScript = undefined;
-      throw error;
-    });
-  }
+    } catch {
+      fail();
+    }
+  }).catch(error => {
+    challengeScript = undefined;
+    throw error;
+  });
   return challengeScript;
 }
 
