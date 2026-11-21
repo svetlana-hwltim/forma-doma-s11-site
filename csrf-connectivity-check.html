@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n7Y/c5rNR2+poSN6rIrimg1TZ8tz701M2cWBYKmaj7s='; style-src 'self'; connect-src https://forma-doma-telegram.olga-form.workers.dev; base-uri 'none'; form-action 'none'">
+  <title>Проверка связи с сервером · Форма Дома</title>
+  <link rel="stylesheet" href="static/css/site.css?v=catalog-4">
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="index.html">Форма Дома</a>
+    </div>
+  </header>
+  <main class="wrap policy">
+    <h1>Проверка связи с сервером</h1>
+    <p>Каждая кнопка запускает один GET с лимитом 10 секунд. Заявка не отправляется, Turnstile не запускается.</p>
+    <p class="hint">Для проверки с тем же Origin, что у формы, откройте эту страницу на GitHub Pages. На localhost Origin другой.</p>
+
+    <section id="csrf-check" aria-labelledby="csrf-title">
+      <h2 id="csrf-title">Открытие формы · GET /api/application</h2>
+      <button class="button primary" type="button">Проверить соединение с сервером</button>
+      <p class="status" role="status">Проверка не запускалась.</p>
+      <dl>
+        <dt>Начало проверки (UTC)</dt><dd data-result="started">—</dd>
+        <dt>Общее ожидание</dt><dd data-result="elapsed">—</dd>
+        <dt>HTTP-заголовки</dt><dd data-result="headers">—</dd>
+        <dt>HTTP-статус</dt><dd data-result="http">—</dd>
+        <dt>Время до заголовков</dt><dd data-result="latency">—</dd>
+        <dt>Чтение JSON</dt><dd data-result="json">—</dd>
+        <dt>Тип ошибки</dt><dd data-result="error">—</dd>
+      </dl>
+    </section>
+
+    <section id="health-check" aria-labelledby="health-title">
+      <h2 id="health-title">Доступность Worker · GET /health</h2>
+      <p class="hint">Ответ 403 может относиться к проверке Origin или правилам доступа. Если /health не разрешает CORS, браузер может скрыть HTTP-статус даже при доступном Worker.</p>
+      <button class="button outline" type="button">Проверить GET /health</button>
+      <p class="status" role="status">Проверка не запускалась.</p>
+      <dl>
+        <dt>Начало проверки (UTC)</dt><dd data-result="started">—</dd>
+        <dt>Общее ожидание</dt><dd data-result="elapsed">—</dd>
+        <dt>HTTP-заголовки</dt><dd data-result="headers">—</dd>
+        <dt>HTTP-статус</dt><dd data-result="http">—</dd>
+        <dt>Время до заголовков</dt><dd data-result="latency">—</dd>
+        <dt>Чтение JSON</dt><dd data-result="json">—</dd>
+        <dt>Тип ошибки</dt><dd data-result="error">—</dd>
+      </dl>
+    </section>
+  </main>
+  <script>
+(() => {
+  const worker = 'https://forma-doma-telegram.olga-form.workers.dev';
+  const timeout = 10000;
+
+  function setup(selector, path, accepts) {
+    const section = document.querySelector(selector);
+    const button = section.querySelector('button');
+    const status = section.querySelector('[role="status"]');
+    const set = (field, value) => {
+      section.querySelector(`[data-result="${field}"]`).textContent = value;
+    };
+
+    button.addEventListener('click', async () => {
+      if (button.disabled) return;
+      button.disabled = true;
+      status.textContent = 'Выполняется проверка…';
+      set('started', new Date().toISOString());
+      set('elapsed', 'Ожидание…');
+      set('headers', 'Ожидание…');
+      for (const key of ['http', 'latency', 'json', 'error']) set(key, '—');
+      const start = performance.now();
+      const elapsed = () => `${Math.round(performance.now() - start)} мс`;
+      let controller, signal, timer, response;
+      let kind = '';
+      try {
+        if (typeof AbortSignal.timeout === 'function') {
+          signal = AbortSignal.timeout(timeout);
+        } else {
+          controller = new AbortController();
+          signal = controller.signal;
+          timer = setTimeout(() => controller.abort(), timeout);
+        }
+        response = await fetch(worker + path, {
+          method: 'GET', credentials: 'omit', cache: 'no-store', redirect: 'error', signal,
+        });
+        set('headers', 'Получены');
+        set('http', String(response.status));
+        set('latency', elapsed());
+        set('json', 'Чтение…');
+        const body = await response.json();
+        set('json', 'Завершено');
+        if (!response.ok) kind = 'HTTP';
+        else if (!accepts(body)) kind = 'JSON · неожиданный формат';
+      } catch (error) {
+        if (!response) set('headers', 'Не получены');
+        set('json', response ? 'Не завершено' : 'Не начато');
+        if (signal?.aborted || error?.name === 'TimeoutError') kind = 'timeout';
+        else if (!response) kind = 'network/CORS';
+        else kind = response.ok ? 'JSON' : 'HTTP';
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+        set('elapsed', elapsed());
+        set('error', kind || 'Нет');
+        status.textContent = kind ? 'Проверка завершилась ошибкой.' : 'Проверка прошла.';
+        button.disabled = false;
+      }
+    });
+  }
+
+  setup('#csrf-check', '/api/application', body => typeof body?.csrf === 'string');
+  setup('#health-check', '/health', body => body?.ok === true);
+})();
+  </script>
+</body>
+</html>
