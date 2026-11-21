@@ -49,29 +49,107 @@ function status(node, message = '', error = false) {
   node.dataset.error = String(error);
 }
 
-async function fetchJson(url, options, timeout) {
+function applicationDiagnostic(stage) {
+  return { stage, phase: 'setup', kind: 'client_error', httpStatus: null, workerCode: null };
+}
+
+const applicationFailureKinds = new Map([
+  ['invalid_request', 'validation'],
+  ['invalid_model', 'validation'],
+  ['invalid_csrf', 'csrf_rejected'],
+  ['challenge_failed', 'turnstile_rejected'],
+  ['challenge_unavailable', 'turnstile_unavailable'],
+  ['origin_denied', 'origin_rejected'],
+  ['submission_conflict', 'submission_conflict'],
+  ['rate_limited', 'rate_limited'],
+  ['telegram_rejected', 'telegram_rejected'],
+  ['pending', 'delivery_unconfirmed'],
+  ['uncertain', 'delivery_unconfirmed'],
+]);
+
+const applicationStageLabels = {
+  validation: 'Проверка полей',
+  csrf: 'Открытие формы',
+  turnstile: 'Проверка Turnstile',
+  application: 'Отправка заявки',
+};
+
+const applicationFailureLabels = {
+  client_error: 'ошибка в браузере',
+  validation: 'проверьте данные',
+  network_or_cors: 'сбой соединения или доступа к серверу',
+  timeout: 'время ожидания истекло',
+  aborted: 'запрос отменён',
+  invalid_json: 'ответ сервера не удалось разобрать',
+  response_read_error: 'ответ сервера получен не полностью',
+  http_error: 'ошибка сервера',
+  unexpected_response: 'неожиданный ответ сервера',
+  csrf_rejected: 'подтверждение формы отклонено',
+  widget_load_failed: 'виджет не загрузился',
+  widget_load_timeout: 'виджет не загрузился вовремя',
+  widget_error: 'ошибка виджета',
+  widget_expired: 'срок проверки истёк',
+  widget_timeout: 'время на проверку истекло',
+  turnstile_rejected: 'проверка отклонена',
+  turnstile_unavailable: 'проверка временно недоступна',
+  origin_rejected: 'источник запроса отклонён',
+  submission_conflict: 'данные заявки изменились',
+  rate_limited: 'слишком много попыток',
+  telegram_rejected: 'доставка отклонена',
+  delivery_unconfirmed: 'доставка не подтверждена',
+};
+
+function recordApplicationError(diagnostic) {
+  const { stage, phase, kind, httpStatus, workerCode } = diagnostic;
+  const time = new Date().toISOString();
+  console.warn('forma_doma_application', {
+    stage, phase, kind, httpStatus, workerCode, time, clientVersion: 'mobile-diagnostic-2',
+  });
+  const http = httpStatus === null ? '' : ` (HTTP ${httpStatus})`;
+  return `${applicationStageLabels[stage]} — ${applicationFailureLabels[kind]}${http} · ${time.slice(11, 19)} UTC.`;
+}
+
+async function fetchJson(url, options, timeout, diagnostic) {
   const controller = typeof AbortSignal.timeout === 'function' ? null : new AbortController();
   const signal = controller ? controller.signal : AbortSignal.timeout(timeout);
   const timer = controller ? setTimeout(() => controller.abort(), timeout) : undefined;
   try {
+    if (diagnostic) diagnostic.phase = 'fetch';
     const response = await fetch(url, { ...options, signal });
+    if (diagnostic) {
+      diagnostic.phase = 'json';
+      diagnostic.httpStatus = response.status;
+    }
     return { response, body: await response.json() };
+  } catch (error) {
+    if (diagnostic) {
+      if (signal.aborted || error?.name === 'TimeoutError') diagnostic.kind = 'timeout';
+      else if (error?.name === 'AbortError') diagnostic.kind = 'aborted';
+      else if (diagnostic.phase === 'json') {
+        diagnostic.kind = error?.name === 'SyntaxError' ? 'invalid_json' : 'response_read_error';
+      } else diagnostic.kind = 'network_or_cors';
+    }
+    throw error;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
 }
 
-async function getFormProof() {
+async function getFormProof(diagnostic) {
   const { response, body } = await fetchJson(apiUrl, {
     credentials: 'omit', cache: 'no-store',
-  }, 10000);
+  }, 10000, diagnostic);
   if (!response.ok || typeof body?.csrf !== 'string') {
+    if (diagnostic) {
+      diagnostic.phase = 'response';
+      diagnostic.kind = response.ok ? 'unexpected_response' : 'http_error';
+    }
     throw new Error('Не удалось открыть форму. Попробуйте позже.');
   }
   return body.csrf;
 }
 
-function loadChallenge() {
+function loadChallenge(diagnostic) {
   if (challengeScript) return challengeScript;
   const isAvailable = api => typeof api?.render === 'function' &&
     typeof api.execute === 'function' && typeof api.remove === 'function';
@@ -85,13 +163,14 @@ function loadChallenge() {
       delete window[callbackName];
       script.onerror = null;
     };
-    const fail = message => {
+    const fail = (message, kind = 'widget_load_failed') => {
+      if (diagnostic) diagnostic.kind = kind;
       finish();
       script.remove();
       reject(new Error(message));
     };
     const unavailable = 'Не удалось загрузить Cloudflare Turnstile. Проверьте соединение и попробуйте снова.';
-    const timer = setTimeout(() => fail(unavailable), 15000);
+    const timer = setTimeout(() => fail(unavailable, 'widget_load_timeout'), 15000);
     window[callbackName] = () => {
       const api = window.turnstile;
       if (!isAvailable(api)) return fail(unavailable);
@@ -112,14 +191,19 @@ function loadChallenge() {
   return challengeScript;
 }
 
-async function getChallengeToken() {
-  const turnstile = await loadChallenge();
+async function getChallengeToken(diagnostic) {
+  if (diagnostic) diagnostic.phase = 'load';
+  const turnstile = await loadChallenge(diagnostic);
+  if (diagnostic) diagnostic.phase = 'widget';
   const container = document.createElement('div');
   form.append(container);
   let widget, timer;
   try {
     return await new Promise((resolve, reject) => {
-      const fail = () => reject(new Error('Не удалось пройти проверку формы. Попробуйте снова.'));
+      const fail = (kind, message = 'Не удалось пройти проверку формы. Попробуйте снова.') => {
+        if (diagnostic) diagnostic.kind = kind;
+        reject(new Error(message));
+      };
       const challengeError = code => {
         const codeText = String(code);
         const message = {
@@ -128,15 +212,15 @@ async function getChallengeToken() {
           '110200': 'Домен сайта не разрешён в настройках Turnstile (110200).',
           '200500': 'Не удалось загрузить окно проверки Turnstile (200500).',
         }[codeText];
-        if (message) reject(new Error(message));
-        else fail();
+        fail('widget_error', message);
         return true;
       };
-      timer = setTimeout(fail, 20000);
+      timer = setTimeout(() => fail('widget_timeout'), 20000);
       widget = turnstile.render(container, {
         sitekey: siteKey, action: 'application', execution: 'execute', appearance: 'interaction-only', retry: 'never',
         'response-field': false, callback: resolve, 'error-callback': challengeError,
-        'expired-callback': fail, 'timeout-callback': fail,
+        'expired-callback': () => fail('widget_expired'),
+        'timeout-callback': () => fail('widget_timeout'),
       });
       turnstile.execute(widget);
     });
@@ -147,13 +231,20 @@ async function getChallengeToken() {
   }
 }
 
-async function post(url, data) {
+async function post(url, data, diagnostic) {
   const { response, body } = await fetchJson(url, {
     method: 'POST',
     credentials: apiUrl ? 'omit' : 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }, apiUrl ? 30000 : 15000);
+  }, apiUrl ? 30000 : 15000, diagnostic);
+  if (diagnostic) {
+    diagnostic.phase = 'response';
+    if (!response.ok) {
+      diagnostic.kind = applicationFailureKinds.get(body?.code) || 'http_error';
+      if (applicationFailureKinds.has(body?.code)) diagnostic.workerCode = body.code;
+    }
+  }
   if (!response.ok && body?.code === 'challenge_unavailable') {
     throw new Error('Сервер временно не смог проверить Turnstile. Попробуйте позже.');
   }
@@ -246,13 +337,15 @@ form.addEventListener('submit', async (event) => {
   const name = fields.name.value.trim();
   const phone = fields.phone.value.trim();
   if (!name) {
-    status(requestStatus, 'Укажите имя.', true);
+    const code = recordApplicationError({ ...applicationDiagnostic('validation'), kind: 'validation' });
+    status(requestStatus, `Укажите имя. ${code}`, true);
     fields.name.focus();
     return;
   }
   const digits = phone.replace(/\D/g, '');
   if (!/^\+?[0-9 ()-]{7,24}$/.test(phone) || digits.length < 10 || digits.length > 15) {
-    status(requestStatus, 'Укажите телефон из 10–15 цифр.', true);
+    const code = recordApplicationError({ ...applicationDiagnostic('validation'), kind: 'validation' });
+    status(requestStatus, `Укажите телефон из 10–15 цифр. ${code}`, true);
     fields.phone.focus();
     return;
   }
@@ -270,13 +363,19 @@ form.addEventListener('submit', async (event) => {
   for (const control of fields) control.disabled = true;
   status(requestStatus, 'Отправляем заявку…');
   let confirmed = false;
+  let diagnostic = applicationDiagnostic('csrf');
   try {
     if (apiUrl) {
-      data.csrf = await getFormProof();
-      data.turnstileToken = await getChallengeToken();
+      data.csrf = await getFormProof(diagnostic);
+      diagnostic = applicationDiagnostic('turnstile');
+      data.turnstileToken = await getChallengeToken(diagnostic);
     }
-    const result = await post(apiUrl || '/api/request', data);
-    if (result?.ok !== true) throw new Error('Доставка заявки не подтверждена.');
+    diagnostic = applicationDiagnostic('application');
+    const result = await post(apiUrl || '/api/request', data, diagnostic);
+    if (result?.ok !== true) {
+      diagnostic.kind = 'unexpected_response';
+      throw new Error('Сервер не подтвердил доставку заявки.');
+    }
     confirmed = true;
     submission = null;
     status(requestStatus, 'Заявка доставлена.');
@@ -284,8 +383,23 @@ form.addEventListener('submit', async (event) => {
     clearAttached();
   } catch (error) {
     if (confirmed) return;
-    if (error.code === 'telegram_rejected') submission = null;
-    status(requestStatus, error.name === 'Error' ? error.message : 'Доставка заявки не подтверждена. Попробуйте позже.', true);
+    if (error?.code === 'telegram_rejected') submission = null;
+    const code = recordApplicationError(diagnostic);
+    const unconfirmed = diagnostic.stage === 'application' &&
+      (diagnostic.phase === 'fetch' || diagnostic.phase === 'json' || diagnostic.kind === 'unexpected_response' ||
+        diagnostic.kind === 'delivery_unconfirmed' || (diagnostic.kind === 'http_error' && diagnostic.httpStatus >= 500));
+    let message = 'Не удалось завершить отправку заявки.';
+    if (diagnostic.stage === 'csrf') message = 'Не удалось открыть форму. Попробуйте позже.';
+    if (diagnostic.stage === 'turnstile') {
+      message = diagnostic.kind.startsWith('widget_') && error?.name === 'Error'
+        ? error.message
+        : 'Не удалось пройти проверку формы. Попробуйте снова.';
+    }
+    if (diagnostic.workerCode && error?.name === 'Error') message = error.message;
+    if (unconfirmed && diagnostic.kind !== 'delivery_unconfirmed') {
+      message = 'Сайт не получил подтверждение доставки. Проверьте получение перед повторной отправкой.';
+    }
+    status(requestStatus, `${message} ${code}`, true);
   } finally {
     for (const control of fields) control.disabled = false;
   }
