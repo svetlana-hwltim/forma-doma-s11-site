@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-v1xXPAsU1AmRmVrWIXDCaqWieN+3+7VTdOEY0A57Nfc='; style-src 'self'; connect-src https://forma-doma-telegram.olga-form.workers.dev https://292e3825-forma-doma-telegram.olga-form.workers.dev; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-ga7gU/bYSTREynJ+tiSrcEo7sRSX7iVOQGqE+y931ok='; style-src 'self'; connect-src 'self' https://api.github.com https://forma-doma-telegram.olga-form.workers.dev https://292e3825-forma-doma-telegram.olga-form.workers.dev; base-uri 'none'; form-action 'none'">
   <title>Проверка связи с сервером · Форма Дома</title>
   <link rel="stylesheet" href="static/css/site.css?v=catalog-4">
 </head>
@@ -65,6 +65,38 @@
         <dt>Тип ошибки</dt><dd data-result="error">—</dd>
       </dl>
     </section>
+
+    <section id="external-check" aria-labelledby="external-title">
+      <h2 id="external-title">Внешний API · GitHub</h2>
+      <p class="hint">Один запрос к публичному endpoint /zen без авторизации. Текст ответа не выводится.</p>
+      <button class="button outline" type="button">Проверить внешний API</button>
+      <p class="status" role="status">Проверка не запускалась.</p>
+      <dl>
+        <dt>Начало проверки (UTC)</dt><dd data-result="started">—</dd>
+        <dt>Общее ожидание</dt><dd data-result="elapsed">—</dd>
+        <dt>HTTP-заголовки</dt><dd data-result="headers">—</dd>
+        <dt>HTTP-статус</dt><dd data-result="http">—</dd>
+        <dt>Время до заголовков</dt><dd data-result="latency">—</dd>
+        <dt>Чтение ответа</dt><dd data-result="json">—</dd>
+        <dt>Тип ошибки</dt><dd data-result="error">—</dd>
+      </dl>
+    </section>
+
+    <section id="same-origin-check" aria-labelledby="same-origin-title">
+      <h2 id="same-origin-title">Контрольный запрос к самому сайту</h2>
+      <p class="hint">Существующий файл стилей каталога загружается с того же домена, что и эта страница.</p>
+      <button class="button outline" type="button">Проверить файл на GitHub Pages</button>
+      <p class="status" role="status">Проверка не запускалась.</p>
+      <dl>
+        <dt>Начало проверки (UTC)</dt><dd data-result="started">—</dd>
+        <dt>Общее ожидание</dt><dd data-result="elapsed">—</dd>
+        <dt>HTTP-заголовки</dt><dd data-result="headers">—</dd>
+        <dt>HTTP-статус</dt><dd data-result="http">—</dd>
+        <dt>Время до заголовков</dt><dd data-result="latency">—</dd>
+        <dt>Чтение ответа</dt><dd data-result="json">—</dd>
+        <dt>Тип ошибки</dt><dd data-result="error">—</dd>
+      </dl>
+    </section>
   </main>
   <script>
 (() => {
@@ -72,7 +104,7 @@
   const alternateWorker = 'https://292e3825-forma-doma-telegram.olga-form.workers.dev';
   const timeout = 10000;
 
-  function setup(selector, url, accepts) {
+  function setup(selector, url, accepts, readText = false) {
     const section = document.querySelector(selector);
     const button = section.querySelector('button');
     const status = section.querySelector('[role="status"]');
@@ -107,16 +139,19 @@
         set('http', String(response.status));
         set('latency', elapsed());
         set('json', 'Чтение…');
-        const body = await response.json();
+        const body = await (readText ? response.text() : response.json());
         set('json', 'Завершено');
         if (!response.ok) kind = 'HTTP';
-        else if (!accepts(body)) kind = 'JSON · неожиданный формат';
+        else if (!accepts(body, response)) {
+          kind = readText ? 'response_read_error' : 'JSON · неожиданный формат';
+        }
       } catch (error) {
         if (!response) set('headers', 'Не получены');
         set('json', response ? 'Не завершено' : 'Не начато');
         if (signal?.aborted || error?.name === 'TimeoutError') kind = 'timeout';
         else if (!response) kind = 'network/CORS';
-        else kind = response.ok ? 'JSON' : 'HTTP';
+        else if (!response.ok) kind = 'HTTP';
+        else kind = readText ? 'response_read_error' : 'JSON';
       } finally {
         if (timer !== undefined) clearTimeout(timer);
         set('elapsed', elapsed());
@@ -131,6 +166,10 @@
   setup('#csrf-check', worker + '/api/application', hasCsrf);
   setup('#alternate-check', alternateWorker + '/api/application', hasCsrf);
   setup('#health-check', worker + '/health', body => body?.ok === true);
+  const textOfType = expected => (body, response) => Boolean(body.trim()) &&
+    response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() === expected;
+  setup('#external-check', 'https://api.github.com/zen', textOfType('text/plain'), true);
+  setup('#same-origin-check', './static/css/catalog.css', textOfType('text/css'), true);
 })();
   </script>
 </body>
