@@ -262,6 +262,11 @@ form.addEventListener('submit', async (event) => {
     category: fields.category.value, consent: fields.consent.checked,
     estimate: attached, submission,
   };
+  if (apiUrl && typeof staticCatalogModelEnabled !== 'undefined' && staticCatalogModelEnabled === true &&
+      typeof getSelectedCatalogModel === 'function') {
+    const model = getSelectedCatalogModel(data.category);
+    if (model) data.model = model;
+  }
   for (const control of fields) control.disabled = true;
   status(requestStatus, 'Отправляем заявку…');
   let confirmed = false;

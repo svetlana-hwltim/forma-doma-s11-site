@@ -313,6 +313,32 @@ h3 {
 .panel textarea {
   resize: vertical;
 }
+.selected-model:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 14px;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--paper);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.selected-model p {
+  flex: 1 1 170px;
+}
+.selected-model button {
+  min-height: 44px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--green);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .fields {
   display: grid;
   grid-template-columns: repeat(2,minmax(0,1fr));
