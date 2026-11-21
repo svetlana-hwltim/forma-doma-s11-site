@@ -49,12 +49,23 @@ function status(node, message = '', error = false) {
   node.dataset.error = String(error);
 }
 
+async function fetchJson(url, options, timeout) {
+  const controller = typeof AbortSignal.timeout === 'function' ? null : new AbortController();
+  const signal = controller ? controller.signal : AbortSignal.timeout(timeout);
+  const timer = controller ? setTimeout(() => controller.abort(), timeout) : undefined;
+  try {
+    const response = await fetch(url, { ...options, signal });
+    return { response, body: await response.json() };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 async function getFormProof() {
-  const response = await fetch(apiUrl, {
-    credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(10000),
-  });
-  const body = await response.json();
-  if (!response.ok || typeof body.csrf !== 'string') {
+  const { response, body } = await fetchJson(apiUrl, {
+    credentials: 'omit', cache: 'no-store',
+  }, 10000);
+  if (!response.ok || typeof body?.csrf !== 'string') {
     throw new Error('Не удалось открыть форму. Попробуйте позже.');
   }
   return body.csrf;
@@ -137,18 +148,16 @@ async function getChallengeToken() {
 }
 
 async function post(url, data) {
-  const response = await fetch(url, {
+  const { response, body } = await fetchJson(url, {
     method: 'POST',
     credentials: apiUrl ? 'omit' : 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-    signal: AbortSignal.timeout(apiUrl ? 30000 : 15000),
-  });
-  const body = await response.json();
-  if (!response.ok && body.code === 'challenge_unavailable') {
+  }, apiUrl ? 30000 : 15000);
+  if (!response.ok && body?.code === 'challenge_unavailable') {
     throw new Error('Сервер временно не смог проверить Turnstile. Попробуйте позже.');
   }
-  if (!response.ok) throw Object.assign(new Error(body.error || 'Сервис временно недоступен.'), { code: body.code });
+  if (!response.ok) throw Object.assign(new Error(body?.error || 'Сервис временно недоступен.'), { code: body?.code });
   return body;
 }
 
@@ -255,18 +264,21 @@ form.addEventListener('submit', async (event) => {
   };
   for (const control of fields) control.disabled = true;
   status(requestStatus, 'Отправляем заявку…');
+  let confirmed = false;
   try {
     if (apiUrl) {
       data.csrf = await getFormProof();
       data.turnstileToken = await getChallengeToken();
     }
     const result = await post(apiUrl || '/api/request', data);
-    if (result.ok !== true) throw new Error('Доставка заявки не подтверждена.');
-    form.reset();
+    if (result?.ok !== true) throw new Error('Доставка заявки не подтверждена.');
+    confirmed = true;
     submission = null;
-    clearAttached();
     status(requestStatus, 'Заявка доставлена.');
+    form.reset();
+    clearAttached();
   } catch (error) {
+    if (confirmed) return;
     if (error.code === 'telegram_rejected') submission = null;
     status(requestStatus, error.name === 'Error' ? error.message : 'Доставка заявки не подтверждена. Попробуйте позже.', true);
   } finally {
