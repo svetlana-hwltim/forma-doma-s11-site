@@ -118,7 +118,10 @@
       <form id="request-form" class="panel" method="post" action="index.html" data-csrf="" data-static-site>
         <div class="fields">
           <label>Имя<input name="name" autocomplete="name" maxlength="80" required></label>
-          <label>Телефон<input name="phone" type="tel" autocomplete="tel" maxlength="24" required placeholder="+7 900 000-00-00"></label>
+          <div>
+            <label>Телефон<input name="phone" type="tel" autocomplete="tel" maxlength="24" required placeholder="+7 900 000-00-00" aria-describedby="phone-hint"></label>
+            <small class="hint" id="phone-hint">Укажите номер в формате +7 999 123-45-67</small>
+          </div>
         </div>
         <label>Вид мебели<select name="category"><option value="">Не выбрано</option><option value="kitchen">Кухни</option><option value="wardrobe">Шкафы</option><option value="closet">Гардеробные</option><option value="storage">Системы хранения</option></select></label>
         <div id="attached" class="attached" hidden><p id="attached-details"></p><button type="button" id="remove-estimate">Убрать расчёт</button></div>
