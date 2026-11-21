@@ -100,13 +100,15 @@ const applicationFailureLabels = {
 };
 
 function recordApplicationError(diagnostic) {
-  const { stage, phase, kind, httpStatus, workerCode } = diagnostic;
+  const { stage, phase, kind, httpStatus, workerCode, attempt, durationMs } = diagnostic;
   const time = new Date().toISOString();
   console.warn('forma_doma_application', {
-    stage, phase, kind, httpStatus, workerCode, time, clientVersion: 'mobile-diagnostic-2',
+    stage, phase, kind, httpStatus, workerCode, time, clientVersion: 'mobile-csrf-retry-1',
+    ...(attempt ? { attempt, durationMs } : {}),
   });
   const http = httpStatus === null ? '' : ` (HTTP ${httpStatus})`;
-  return `${applicationStageLabels[stage]} — ${applicationFailureLabels[kind]}${http} · ${time.slice(11, 19)} UTC.`;
+  const attemptLabel = attempt ? ` · попытка ${attempt} из 2` : '';
+  return `${applicationStageLabels[stage]} — ${applicationFailureLabels[kind]}${http}${attemptLabel} · ${time.slice(11, 19)} UTC.`;
 }
 
 async function fetchJson(url, options, timeout, diagnostic) {
@@ -135,18 +137,29 @@ async function fetchJson(url, options, timeout, diagnostic) {
   }
 }
 
-async function getFormProof(diagnostic) {
-  const { response, body } = await fetchJson(apiUrl, {
-    credentials: 'omit', cache: 'no-store',
-  }, 10000, diagnostic);
-  if (!response.ok || typeof body?.csrf !== 'string') {
-    if (diagnostic) {
-      diagnostic.phase = 'response';
-      diagnostic.kind = response.ok ? 'unexpected_response' : 'http_error';
+async function getFormProof(diagnostic = applicationDiagnostic('csrf')) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    Object.assign(diagnostic, applicationDiagnostic('csrf'), { attempt, durationMs: null });
+    const started = performance.now();
+    try {
+      const { response, body } = await fetchJson(apiUrl, {
+        credentials: 'omit', cache: 'no-store',
+      }, 10000, diagnostic);
+      if (!response.ok || typeof body?.csrf !== 'string') {
+        diagnostic.phase = 'response';
+        diagnostic.kind = response.ok ? 'unexpected_response' : 'http_error';
+        throw new Error('Не удалось открыть форму. Попробуйте позже.');
+      }
+      return body.csrf;
+    } catch (error) {
+      diagnostic.durationMs = Math.round(performance.now() - started);
+      const networkError = diagnostic.kind === 'network_or_cors' &&
+        (error?.name === 'TypeError' || error?.name === 'NetworkError');
+      if (attempt !== 1 || diagnostic.phase !== 'fetch' ||
+          (diagnostic.kind !== 'timeout' && !networkError)) throw error;
+      recordApplicationError(diagnostic);
     }
-    throw new Error('Не удалось открыть форму. Попробуйте позже.');
   }
-  return body.csrf;
 }
 
 function loadChallenge(diagnostic) {
@@ -389,7 +402,12 @@ form.addEventListener('submit', async (event) => {
       (diagnostic.phase === 'fetch' || diagnostic.phase === 'json' || diagnostic.kind === 'unexpected_response' ||
         diagnostic.kind === 'delivery_unconfirmed' || (diagnostic.kind === 'http_error' && diagnostic.httpStatus >= 500));
     let message = 'Не удалось завершить отправку заявки.';
-    if (diagnostic.stage === 'csrf') message = 'Не удалось открыть форму. Попробуйте позже.';
+    if (diagnostic.stage === 'csrf') {
+      message = diagnostic.attempt === 2 &&
+        (diagnostic.kind === 'timeout' || diagnostic.kind === 'network_or_cors')
+        ? 'Не удалось открыть форму. Проверьте соединение и попробуйте снова. Заявка не отправлена.'
+        : 'Не удалось открыть форму. Попробуйте позже.';
+    }
     if (diagnostic.stage === 'turnstile') {
       message = diagnostic.kind.startsWith('widget_') && error?.name === 'Error'
         ? error.message
