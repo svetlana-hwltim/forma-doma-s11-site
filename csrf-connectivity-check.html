@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n7Y/c5rNR2+poSN6rIrimg1TZ8tz701M2cWBYKmaj7s='; style-src 'self'; connect-src https://forma-doma-telegram.olga-form.workers.dev; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-v1xXPAsU1AmRmVrWIXDCaqWieN+3+7VTdOEY0A57Nfc='; style-src 'self'; connect-src https://forma-doma-telegram.olga-form.workers.dev https://292e3825-forma-doma-telegram.olga-form.workers.dev; base-uri 'none'; form-action 'none'">
   <title>Проверка связи с сервером · Форма Дома</title>
   <link rel="stylesheet" href="static/css/site.css?v=catalog-4">
 </head>
@@ -22,6 +22,22 @@
     <section id="csrf-check" aria-labelledby="csrf-title">
       <h2 id="csrf-title">Открытие формы · GET /api/application</h2>
       <button class="button primary" type="button">Проверить соединение с сервером</button>
+      <p class="status" role="status">Проверка не запускалась.</p>
+      <dl>
+        <dt>Начало проверки (UTC)</dt><dd data-result="started">—</dd>
+        <dt>Общее ожидание</dt><dd data-result="elapsed">—</dd>
+        <dt>HTTP-заголовки</dt><dd data-result="headers">—</dd>
+        <dt>HTTP-статус</dt><dd data-result="http">—</dd>
+        <dt>Время до заголовков</dt><dd data-result="latency">—</dd>
+        <dt>Чтение JSON</dt><dd data-result="json">—</dd>
+        <dt>Тип ошибки</dt><dd data-result="error">—</dd>
+      </dl>
+    </section>
+
+    <section id="alternate-check" aria-labelledby="alternate-title">
+      <h2 id="alternate-title">Альтернативный Worker · GET /api/application</h2>
+      <p class="hint">Проверяется адрес версии 292e3825. Запустите тест с опубликованной страницы, чтобы браузер передал Origin сайта.</p>
+      <button class="button outline" type="button">Проверить альтернативный адрес Worker</button>
       <p class="status" role="status">Проверка не запускалась.</p>
       <dl>
         <dt>Начало проверки (UTC)</dt><dd data-result="started">—</dd>
@@ -53,9 +69,10 @@
   <script>
 (() => {
   const worker = 'https://forma-doma-telegram.olga-form.workers.dev';
+  const alternateWorker = 'https://292e3825-forma-doma-telegram.olga-form.workers.dev';
   const timeout = 10000;
 
-  function setup(selector, path, accepts) {
+  function setup(selector, url, accepts) {
     const section = document.querySelector(selector);
     const button = section.querySelector('button');
     const status = section.querySelector('[role="status"]');
@@ -83,7 +100,7 @@
           signal = controller.signal;
           timer = setTimeout(() => controller.abort(), timeout);
         }
-        response = await fetch(worker + path, {
+        response = await fetch(url, {
           method: 'GET', credentials: 'omit', cache: 'no-store', redirect: 'error', signal,
         });
         set('headers', 'Получены');
@@ -110,8 +127,10 @@
     });
   }
 
-  setup('#csrf-check', '/api/application', body => typeof body?.csrf === 'string');
-  setup('#health-check', '/health', body => body?.ok === true);
+  const hasCsrf = body => typeof body?.csrf === 'string';
+  setup('#csrf-check', worker + '/api/application', hasCsrf);
+  setup('#alternate-check', alternateWorker + '/api/application', hasCsrf);
+  setup('#health-check', worker + '/health', body => body?.ok === true);
 })();
   </script>
 </body>
