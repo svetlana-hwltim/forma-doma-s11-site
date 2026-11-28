@@ -22,7 +22,7 @@ const form = document.querySelector('#request-form');
 const staticMode = form.hasAttribute('data-static-site');
 const configuredApi = staticMode && typeof staticApiUrl === 'string' ? staticApiUrl : '';
 const siteKey = typeof staticTurnstileSiteKey === 'string' ? staticTurnstileSiteKey : '';
-const apiUrl = siteKey && configuredApi === 'https://forma-doma-telegram.olga-form.workers.dev/api/application'
+const apiUrl = siteKey && configuredApi === 'https://d5di9ohloumjr3aku47p.uvah0e6r.apigw.yandexcloud.net/api/application'
   ? configuredApi
   : '';
 let challengeScript;
@@ -34,8 +34,87 @@ const requestStatus = document.querySelector('#request-status');
 const money = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 });
 let estimate = null;
 let attached = null;
-let submission = null;
-if (apiUrl) form.querySelector('button[type=submit]').disabled = false;
+const submissionStorageKey = 'forma-doma-s11-site:application-attempt:v1';
+const requestButton = form.querySelector('button[type=submit]');
+const attemptNotice = document.createElement('p');
+attemptNotice.className = 'status';
+attemptNotice.setAttribute('role', 'status');
+requestStatus.after(attemptNotice);
+let sending = false;
+
+function readSubmissionAttempt() {
+  const raw = localStorage.getItem(submissionStorageKey);
+  if (raw === null) return null;
+  const attempt = JSON.parse(raw);
+  if (typeof attempt?.id !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(attempt?.id) ||
+      !Number.isSafeInteger(attempt.startedAt) || attempt.startedAt <= 0) {
+    throw new Error('Invalid stored submission attempt');
+  }
+  return attempt;
+}
+
+function refreshSubmissionState() {
+  let blocked = false;
+  let message = '';
+  if (!staticMode || apiUrl) {
+    try {
+      if (typeof navigator.locks?.request !== 'function') throw new Error('Web Locks unavailable');
+      const attempt = readSubmissionAttempt();
+      blocked = Boolean(attempt);
+      if (attempt) {
+        const time = new Date(attempt.startedAt).toLocaleString('ru-RU');
+        message = [
+          'Исход предыдущей заявки неизвестен. Новая отправка может создать дубликат.',
+          `Идентификатор попытки: ${attempt.id}. Время: ${time}.`,
+          'Оператору необходимо сверить состояние заявки в D1 и соответствующее сообщение в Telegram.',
+          'Без достоверного результата блокировку снимать нельзя. Снятие блокировки через форму недоступно.',
+        ].join(' ');
+      }
+    } catch {
+      blocked = true;
+      message = 'Защита от повторов недоступна. Откройте форму в браузере с доступом к локальному хранилищу.';
+    }
+  }
+  attemptNotice.hidden = !message;
+  status(attemptNotice, message, blocked);
+  requestButton.disabled = sending || blocked || (staticMode && !apiUrl);
+}
+
+window.addEventListener('storage', (event) => {
+  if (event.key === submissionStorageKey || event.key === null) refreshSubmissionState();
+});
+window.addEventListener('pageshow', refreshSubmissionState);
+refreshSubmissionState();
+
+const confirmedRejections = new Map([
+  ['invalid_request', 400], ['invalid_model', 400], ['invalid_csrf', 403],
+  ['origin_denied', 403], ['challenge_failed', 403], ['rate_limited', 429],
+  ['telegram_rejected', 502], ['challenge_unavailable', 503],
+]);
+
+async function sendProtectedApplication(data, prepare, send) {
+  const lockError = () => Object.assign(
+    new Error('Отправка уже выполняется или ждёт ручной сверки.'),
+    { code: 'submission_locked' },
+  );
+  return navigator.locks.request(submissionStorageKey, { ifAvailable: true }, async (lock) => {
+    if (!lock || readSubmissionAttempt()) throw lockError();
+    await prepare();
+    const attempt = { id: submissionId(), startedAt: Date.now() };
+    localStorage.setItem(submissionStorageKey, JSON.stringify(attempt));
+    data.submission = attempt.id;
+    try {
+      const result = await send();
+      if (result?.ok !== true) throw new Error('Сервер не подтвердил доставку заявки.');
+    } catch (error) {
+      if (confirmedRejections.has(error?.code) && confirmedRejections.get(error.code) === error.httpStatus) {
+        localStorage.removeItem(submissionStorageKey);
+      }
+      throw error;
+    }
+    localStorage.removeItem(submissionStorageKey);
+  });
+}
 if (staticMode && !apiUrl) status(requestStatus, 'Отправка заявок пока не подключена.');
 
 function submissionId() {
@@ -61,6 +140,7 @@ const applicationFailureKinds = new Map([
   ['challenge_unavailable', 'turnstile_unavailable'],
   ['origin_denied', 'origin_rejected'],
   ['submission_conflict', 'submission_conflict'],
+  ['submission_already_used', 'delivery_unconfirmed'],
   ['rate_limited', 'rate_limited'],
   ['telegram_rejected', 'telegram_rejected'],
   ['pending', 'delivery_unconfirmed'],
@@ -259,9 +339,11 @@ async function post(url, data, diagnostic) {
     }
   }
   if (!response.ok && body?.code === 'challenge_unavailable') {
-    throw new Error('Сервер временно не смог проверить Turnstile. Попробуйте позже.');
+    throw Object.assign(new Error('Сервер временно не смог проверить Turnstile. Попробуйте позже.'), {
+      code: body.code, httpStatus: response.status,
+    });
   }
-  if (!response.ok) throw Object.assign(new Error(body?.error || 'Сервис временно недоступен.'), { code: body?.code });
+  if (!response.ok) throw Object.assign(new Error(body?.error || 'Сервис временно недоступен.'), { code: body?.code, httpStatus: response.status });
   return body;
 }
 
@@ -344,11 +426,10 @@ document.querySelector('#use-estimate').addEventListener('click', () => {
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const button = form.querySelector('button[type=submit]');
-  if (button.disabled || (staticMode && !apiUrl)) return;
+  if (requestButton.disabled || sending) return;
   const fields = form.elements;
-  const name = fields.name.value.trim();
-  const phone = fields.phone.value.trim();
+  const name = 'Демо-клиент';
+  const phone = '+7 (000) 000-00-00';
   if (!name) {
     const code = recordApplicationError({ ...applicationDiagnostic('validation'), kind: 'validation' });
     status(requestStatus, `Укажите имя. ${code}`, true);
@@ -362,41 +443,45 @@ form.addEventListener('submit', async (event) => {
     fields.phone.focus();
     return;
   }
-  submission ||= submissionId();
   const data = {
-    name, phone, comment: fields.comment.value,
+    name, phone, comment: 'Тестовая заявка с демонстрационного сайта Форма Дома.',
     category: fields.category.value, consent: fields.consent.checked,
-    estimate: attached, submission,
+    estimate: attached,
   };
   if (apiUrl && typeof staticCatalogModelEnabled !== 'undefined' && staticCatalogModelEnabled === true &&
       typeof getSelectedCatalogModel === 'function') {
     const model = getSelectedCatalogModel(data.category);
     if (model) data.model = model;
   }
+  sending = true;
   for (const control of fields) control.disabled = true;
+  refreshSubmissionState();
   status(requestStatus, 'Отправляем заявку…');
   let confirmed = false;
   let diagnostic = applicationDiagnostic('csrf');
   try {
-    if (apiUrl) {
-      data.csrf = await getFormProof(diagnostic);
-      diagnostic = applicationDiagnostic('turnstile');
-      data.turnstileToken = await getChallengeToken(diagnostic);
-    }
-    diagnostic = applicationDiagnostic('application');
-    const result = await post(apiUrl || '/api/request', data, diagnostic);
-    if (result?.ok !== true) {
-      diagnostic.kind = 'unexpected_response';
-      throw new Error('Сервер не подтвердил доставку заявки.');
-    }
+    await sendProtectedApplication(data, async () => {
+      if (apiUrl) {
+        data.csrf = await getFormProof(diagnostic);
+        diagnostic = applicationDiagnostic('turnstile');
+        data.turnstileToken = await getChallengeToken(diagnostic);
+      }
+    }, async () => {
+      diagnostic = applicationDiagnostic('application');
+      const result = await post(apiUrl || '/api/request', data, diagnostic);
+      if (result?.ok !== true) diagnostic.kind = 'unexpected_response';
+      return result;
+    });
     confirmed = true;
-    submission = null;
-    status(requestStatus, 'Заявка доставлена.');
+    status(requestStatus, 'Тестовая заявка доставлена.');
     form.reset();
     clearAttached();
   } catch (error) {
     if (confirmed) return;
-    if (error?.code === 'telegram_rejected') submission = null;
+    if (error?.code === 'submission_locked') {
+      status(requestStatus, error.message, true);
+      return;
+    }
     const code = recordApplicationError(diagnostic);
     const unconfirmed = diagnostic.stage === 'application' &&
       (diagnostic.phase === 'fetch' || diagnostic.phase === 'json' || diagnostic.kind === 'unexpected_response' ||
@@ -420,5 +505,7 @@ form.addEventListener('submit', async (event) => {
     status(requestStatus, `${message} ${code}`, true);
   } finally {
     for (const control of fields) control.disabled = false;
+    sending = false;
+    refreshSubmissionState();
   }
 });
